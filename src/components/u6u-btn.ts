@@ -41,20 +41,21 @@ export class U6uBtn extends HTMLElement {
   }
 
   private _handleClick() {
+    if (this.hasAttribute('disabled')) return;
+
     const workflow = this.getAttribute('workflow');
-    if (!workflow) {
-      console.warn('[u6u-btn] workflow attribute is not set, click event ignored');
-      return;
+    if (workflow) {
+      // Cypher binding 模式：發出 u6u:trigger
+      const workflowId = workflow.replace('workflow://', '');
+      this.dispatchEvent(new CustomEvent('u6u:trigger', {
+        bubbles: true,
+        composed: true,
+        detail: { workflowId, payload: {} },
+      }));
+    } else {
+      // 一般按鈕模式：re-dispatch 原生 click 讓外層 addEventListener 能收到
+      this.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true }));
     }
-
-    // 解析 workflow://id
-    const workflowId = workflow.replace('workflow://', '');
-
-    this.dispatchEvent(new CustomEvent('u6u:trigger', {
-      bubbles: true,
-      composed: true,
-      detail: { workflowId, payload: {} },
-    }));
   }
 
   private _render() {
