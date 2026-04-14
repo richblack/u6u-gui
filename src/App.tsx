@@ -3,10 +3,11 @@ import CanvasPage from './pages/CanvasPage';
 import ComponentsPage from './pages/ComponentsPage';
 import WorkflowsPage from './pages/WorkflowsPage';
 import LoginPage from './pages/LoginPage';
+import PrototypeEditorPage from './pages/PrototypeEditorPage';
 import { isAuthenticated, setAuth, clearAuth, getApiKey } from './hooks/useAuth';
 import { setApiKey, logAction } from './api';
 
-type Page = 'canvas' | 'components' | 'workflows';
+type Page = 'canvas' | 'components' | 'workflows' | 'prototype';
 
 const VERSION = '0.1.0';
 
@@ -52,6 +53,8 @@ export default function App() {
     logAction('NAVIGATE', { page: p });
   };
 
+  const isFullHeight = page === 'prototype';
+
   if (!authed) {
     return <LoginPage onLogin={handleLogin} />;
   }
@@ -60,6 +63,7 @@ export default function App() {
     { id: 'canvas', label: '畫布' },
     { id: 'components', label: '零件庫' },
     { id: 'workflows', label: 'Workflow' },
+    { id: 'prototype', label: 'Prototype' },
   ];
 
   return (
@@ -107,13 +111,19 @@ export default function App() {
       </header>
 
       {/* 主內容 */}
-      <main className="flex-1 overflow-auto px-6 py-6 max-w-6xl w-full mx-auto">
-        {page === 'canvas' && (
-          <CanvasPage key={canvasWorkflowId} initialWorkflowId={canvasWorkflowId} />
-        )}
-        {page === 'components' && <ComponentsPage />}
-        {page === 'workflows' && <WorkflowsPage onEditWorkflow={handleEditWorkflow} />}
-      </main>
+      {isFullHeight ? (
+        <main style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+          {page === 'prototype' && <PrototypeEditorPage />}
+        </main>
+      ) : (
+        <main className="flex-1 overflow-auto px-6 py-6 max-w-6xl w-full mx-auto">
+          {page === 'canvas' && (
+            <CanvasPage key={canvasWorkflowId} initialWorkflowId={canvasWorkflowId} />
+          )}
+          {page === 'components' && <ComponentsPage />}
+          {page === 'workflows' && <WorkflowsPage onEditWorkflow={handleEditWorkflow} />}
+        </main>
+      )}
     </div>
   );
 }
