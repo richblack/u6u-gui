@@ -12,21 +12,7 @@ jobs:
       deployments: write
 
     steps:
-      - name: Checkout u6u-gui
-        uses: actions/checkout@v4
-        with:
-          path: u6u-gui
-
-      - name: Checkout matrix (for u6u-core web-components)
-        uses: actions/checkout@v4
-        with:
-          repository: richblack/inkstone-matrix
-          path: matrix
-
-      - name: Link u6u-core into place
-        run: |
-          mkdir -p u6u-gui/../u6u-core
-          ln -s ${{ github.workspace }}/matrix/u6u-core ${{ github.workspace }}/u6u-core
+      - uses: actions/checkout@v4
 
       - uses: pnpm/action-setup@v4
         with:
@@ -36,20 +22,15 @@ jobs:
         with:
           node-version: '22'
           cache: 'pnpm'
-          cache-dependency-path: u6u-gui/pnpm-lock.yaml
 
       - name: Install dependencies
-        working-directory: u6u-gui
         run: pnpm install --frozen-lockfile
 
       - name: Build
-        working-directory: u6u-gui
         run: pnpm build
 
       - name: Deploy to Cloudflare Pages
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          workingDirectory: u6u-gui
-          command: pages deploy dist --project-name=u6u-gui
+        run: pnpm exec wrangler pages deploy dist --project-name=u6u-gui
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

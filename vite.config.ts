@@ -7,7 +7,7 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
-      '@u6u-wc': path.resolve(__dirname, '../u6u-core/web-components/src'),
+      '@u6u-wc': path.resolve(__dirname, 'src/components'),
     },
   },
 });

@@ -18,7 +18,7 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true,
     "paths": {
-      "@u6u-wc/*": ["../u6u-core/web-components/src/*"]
+      "@u6u-wc/*": ["./src/components/*"]
     }
   },
   "include": ["src"]
