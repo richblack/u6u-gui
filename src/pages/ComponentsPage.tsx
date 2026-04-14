@@ -4,7 +4,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { searchComponents } from '../api';
+import { searchComponents, logAction } from '../api';
 import type { Component } from '../api';
 
 // ── 穩定度標籤顏色 ────────────────────────────────────────────────────────────
@@ -108,7 +108,10 @@ export default function ComponentsPage() {
 
   // 即時搜尋（debounce 300ms）
   useEffect(() => {
-    const timer = setTimeout(() => { void load(query); }, 300);
+    const timer = setTimeout(() => {
+      void load(query);
+      if (query) logAction('FILTER_COMPONENTS', { query });
+    }, 300);
     return () => clearTimeout(timer);
   }, [query, load]);
 

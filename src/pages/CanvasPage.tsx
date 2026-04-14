@@ -5,7 +5,8 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import type { U6uTriggerDetail } from '../types/web-components';
-import { listWorkflows, updateWorkflow, executeWorkflow } from '../api';
+import { listWorkflows, updateWorkflow, executeWorkflow, getWorkflow, logAction } from '../api';
+import { usePoll } from '../hooks/usePoll';
 
 // 動態載入 Web Components
 if (typeof window !== 'undefined' && !customElements.get('u6u-btn')) {
@@ -13,6 +14,9 @@ if (typeof window !== 'undefined' && !customElements.get('u6u-btn')) {
   void import(/* @vite-ignore */ '@u6u-wc/u6u-card').catch(() => {});
   void import(/* @vite-ignore */ '@u6u-wc/u6u-text-input').catch(() => {});
   void import(/* @vite-ignore */ '@u6u-wc/u6u-text-field').catch(() => {});
+  void import(/* @vite-ignore */ '@u6u-wc/u6u-badge').catch(() => {});
+  void import(/* @vite-ignore */ '@u6u-wc/u6u-alert').catch(() => {});
+  void import(/* @vite-ignore */ '@u6u-wc/u6u-select').catch(() => {});
 }
 
 // ── 型別 ──────────────────────────────────────────────────────────────────────
@@ -41,6 +45,13 @@ function parseTripletLine(line: string, index: number): Triplet | null {
 
 function formatTriplet(t: Triplet): string {
   return `${t.subject} >> ${t.predicate} >> ${t.object}`;
+}
+
+function parseTriplets(raw: string): Triplet[] {
+  return raw
+    .split('\n')
+    .map((line, i) => parseTripletLine(line, i))
+    .filter((t): t is Triplet => t !== null);
 }
 
 // ── 子元件：UI 視圖 ───────────────────────────────────────────────────────────
@@ -93,6 +104,7 @@ function LogicViewPanel({
   selectedWorkflow, workflows, onWorkflowChange,
 }: LogicViewPanelProps) {
   const textFieldRef = useRef<HTMLElement & { value?: string }>(null);
+  const selectRef = useRef<HTMLElement & { value?: string }>(null);
 
   useEffect(() => {
     const el = textFieldRef.current;
@@ -102,20 +114,30 @@ function LogicViewPanel({
     return () => el.removeEventListener('input', handler);
   }, [onEditChange]);
 
+  // u6u-select change event
+  useEffect(() => {
+    const el = selectRef.current;
+    if (!el) return;
+    const handler = (e: Event) => {
+      const ce = e as CustomEvent<{ value: string }>;
+      onWorkflowChange(ce.detail?.value ?? '');
+    };
+    el.addEventListener('change', handler);
+    return () => el.removeEventListener('change', handler);
+  }, [onWorkflowChange]);
+
+  const options = JSON.stringify(workflows.map(w => ({ value: w.id, label: w.name })));
+
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-1">
-        <label className="text-xs text-zinc-500">綁定 Workflow（ON_CLICK）</label>
-        <select
-          className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-100 text-sm focus:outline-none focus:border-blue-500"
+        <u6u-select
+          ref={selectRef}
+          label="綁定 Workflow（ON_CLICK）"
+          options={options}
           value={selectedWorkflow}
-          onChange={e => onWorkflowChange(e.target.value)}
-        >
-          <option value="">— 未綁定 —</option>
-          {workflows.map(w => (
-            <option key={w.id} value={w.id}>{w.name}</option>
-          ))}
-        </select>
+          placeholder="— 未綁定 —"
+        />
         {selectedWorkflow && (
           <p className="text-xs text-zinc-600 font-mono">
             ON_CLICK &gt;&gt; workflow://{selectedWorkflow}
@@ -214,24 +236,61 @@ export default function CanvasPage({ initialWorkflowId }: CanvasPageProps) {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [lastTrigger, setLastTrigger] = useState<U6uTriggerDetail | null>(null);
   const [runResult, setRunResult] = useState<string | null>(null);
+  const [aiUpdateBadge, setAiUpdateBadge] = useState(false);
+  // 暫存 AI 在 Editing 期間的遠端更新
+  const pendingRemoteTripletsRef = useRef<Triplet[] | null>(null);
+
+  const isEditing = state === 'Editing' || state === 'Saving';
+  const isLogicSide = state === 'LogicView' || isEditing;
 
   useEffect(() => {
     listWorkflows().then(setWorkflows).catch(() => {});
   }, []);
 
-  // Polling：每 5 秒重新載入 Workflow 清單（AI 操作後即時反映）
+  // 打開 Workflow 時記錄 action log
   useEffect(() => {
-    const id = setInterval(() => {
-      listWorkflows().then(setWorkflows).catch(() => {});
-    }, 5000);
-    return () => clearInterval(id);
-  }, []);
+    if (initialWorkflowId) {
+      logAction('OPEN_WORKFLOW', { workflow_id: initialWorkflowId });
+    }
+  }, [initialWorkflowId]);
 
-  const isLogicSide = state === 'LogicView' || state === 'Editing' || state === 'Saving';
+  // Poll 當前 Workflow（3 秒），偵測 AI 更新
+  const pollWorkflow = useCallback(async () => {
+    if (!selectedWorkflow) return;
+    try {
+      const wf = await getWorkflow(selectedWorkflow);
+      const remoteTriplets = parseTriplets((wf.slots?.triplets as string | undefined) ?? '');
+      const remoteStr = remoteTriplets.map(formatTriplet).join('\n');
+      const localStr = triplets.map(formatTriplet).join('\n');
+      if (remoteStr !== localStr) {
+        if (isEditing) {
+          // 用戶正在編輯，暫存遠端狀態
+          pendingRemoteTripletsRef.current = remoteTriplets;
+        } else {
+          setTriplets(remoteTriplets);
+          setAiUpdateBadge(true);
+          setTimeout(() => setAiUpdateBadge(false), 3000);
+        }
+      }
+    } catch { /* 靜默忽略 */ }
+  }, [selectedWorkflow, triplets, isEditing]);
+
+  usePoll(pollWorkflow, 3000, !!selectedWorkflow);
+
+  // Workflow 清單 poll（5 秒）
+  const pollWorkflows = useCallback(() => {
+    listWorkflows().then(setWorkflows).catch(() => {});
+  }, []);
+  usePoll(pollWorkflows, 5000, true);
 
   const handleFlip = useCallback(() => {
-    if (state === 'UIView') setState('LogicView');
-    else if (state === 'LogicView') setState('UIView');
+    if (state === 'UIView') {
+      setState('LogicView');
+      logAction('FLIP_CANVAS', { to: 'LogicView' });
+    } else if (state === 'LogicView') {
+      setState('UIView');
+      logAction('FLIP_CANVAS', { to: 'UIView' });
+    }
   }, [state]);
 
   const handleEditStart = useCallback(() => {
@@ -242,18 +301,26 @@ export default function CanvasPage({ initialWorkflowId }: CanvasPageProps) {
   const handleSave = useCallback(async () => {
     setState('Saving');
     setSaveError(null);
-    const parsed = editingText
-      .split('\n')
-      .map((line, i) => parseTripletLine(line, i))
-      .filter((t): t is Triplet => t !== null);
+    const parsed = parseTriplets(editingText);
     try {
       if (selectedWorkflow) {
         await updateWorkflow(selectedWorkflow, {
           triplets: parsed.map(formatTriplet).join('\n'),
         });
+        logAction('SAVE_TRIPLETS', {
+          workflow_id: selectedWorkflow,
+          triplet_count: parsed.length,
+        });
       }
       setTriplets(parsed);
       setState('LogicView');
+      // 儲存後套用期間的 AI 更新
+      if (pendingRemoteTripletsRef.current) {
+        setTriplets(pendingRemoteTripletsRef.current);
+        pendingRemoteTripletsRef.current = null;
+        setAiUpdateBadge(true);
+        setTimeout(() => setAiUpdateBadge(false), 3000);
+      }
     } catch (e) {
       setSaveError(e instanceof Error ? e.message : '儲存失敗');
       setState('LogicView');
@@ -263,6 +330,11 @@ export default function CanvasPage({ initialWorkflowId }: CanvasPageProps) {
   const handleCancelEdit = useCallback(() => {
     setState('LogicView');
     setEditingText('');
+    // 取消後套用 AI 更新
+    if (pendingRemoteTripletsRef.current) {
+      setTriplets(pendingRemoteTripletsRef.current);
+      pendingRemoteTripletsRef.current = null;
+    }
   }, []);
 
   const handleRunWorkflow = useCallback(async () => {
@@ -273,11 +345,28 @@ export default function CanvasPage({ initialWorkflowId }: CanvasPageProps) {
         triplets: triplets.map(formatTriplet),
         context: {},
       });
-      setRunResult(result.success ? '✅ 執行成功' : `❌ ${result.error ?? '執行失敗'}`);
+      const resultText = result.success ? '✅ 執行成功' : `❌ ${result.error ?? '執行失敗'}`;
+      setRunResult(resultText);
+      logAction('RUN_WORKFLOW', {
+        workflow_id: selectedWorkflow,
+        success: result.success,
+        error: result.error,
+      });
     } catch (e) {
-      setRunResult(`❌ ${e instanceof Error ? e.message : '執行失敗'}`);
+      const errText = `❌ ${e instanceof Error ? e.message : '執行失敗'}`;
+      setRunResult(errText);
+      logAction('RUN_WORKFLOW', {
+        workflow_id: selectedWorkflow,
+        success: false,
+        error: errText,
+      });
     }
   }, [selectedWorkflow, triplets]);
+
+  const handleWorkflowChange = useCallback((id: string) => {
+    setSelectedWorkflow(id);
+    if (id) logAction('BIND_WORKFLOW', { workflow_id: id });
+  }, []);
 
   return (
     <div className="flex flex-col gap-4">
@@ -287,6 +376,11 @@ export default function CanvasPage({ initialWorkflowId }: CanvasPageProps) {
           {isLogicSide ? '邏輯視圖' : 'UI 視圖'}
           {state === 'Saving' && <span className="ml-2 text-xs text-zinc-500 animate-pulse">儲存中…</span>}
         </span>
+
+        {/* AI 更新 badge */}
+        {aiUpdateBadge && (
+          <u6u-badge label="AI 已更新" variant="info" />
+        )}
 
         {selectedWorkflow && state !== 'Editing' && state !== 'Saving' && (
           <button
@@ -302,7 +396,7 @@ export default function CanvasPage({ initialWorkflowId }: CanvasPageProps) {
           label={isLogicSide ? '⬅ UI 視圖' : '邏輯視圖 ➡'}
           color={isLogicSide ? '#6b7280' : '#8b5cf6'}
           tooltip="切換 UI / 邏輯視圖"
-          disabled={state === 'Editing' || state === 'Saving' ? '' : undefined}
+          disabled={isEditing ? '' : undefined}
         />
 
         {state === 'Editing' && (
@@ -321,7 +415,7 @@ export default function CanvasPage({ initialWorkflowId }: CanvasPageProps) {
       />
 
       {saveError && (
-        <div className="text-red-400 text-xs bg-red-900/20 rounded p-2">{saveError}</div>
+        <u6u-alert variant="error" message={saveError} />
       )}
 
       {runResult && (
@@ -349,7 +443,7 @@ export default function CanvasPage({ initialWorkflowId }: CanvasPageProps) {
             onEditChange={setEditingText}
             selectedWorkflow={selectedWorkflow}
             workflows={workflows}
-            onWorkflowChange={setSelectedWorkflow}
+            onWorkflowChange={handleWorkflowChange}
           />
         )}
       </div>
