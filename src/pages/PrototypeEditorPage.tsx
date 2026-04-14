@@ -1,10 +1,14 @@
-import { useEffect, useCallback, useState } from 'react';
+import { useEffect, useCallback, useState, useRef } from 'react';
 import { usePrototypeEditor } from '../hooks/usePrototypeEditor';
 import { ComponentPanel } from '../components/prototype/ComponentPanel';
 import { CanvasEditor } from '../components/prototype/CanvasEditor';
 import { PropertiesPanel } from '../components/prototype/PropertiesPanel';
-import { listWorkflows, logAction } from '../api';
+import {
+  listWorkflows, logAction,
+  listPrototypePages, createPrototypePage, savePrototypePage,
+} from '../api';
 import type { WorkflowRecord } from '../api';
+import type { CanvasElement } from '../types/prototype';
 
 const toolbarBtnStyle: React.CSSProperties = {
   background: '#27272a',
@@ -25,17 +29,35 @@ export default function PrototypeEditorPage() {
 
   const [workflows, setWorkflows] = useState<WorkflowRecord[]>([]);
   const [pageName, setPageName] = useState('未命名頁面');
+  const recordIdRef = useRef<string | null>(null);
 
+  // 初始化：載入第一個 prototype page 或建立新的
   useEffect(() => {
     listWorkflows().then(setWorkflows).catch(() => {});
-  }, []);
+    listPrototypePages().then(async pages => {
+      if (pages.length > 0) {
+        const page = pages[0];
+        recordIdRef.current = page.id;
+        setPageName(page.page_name);
+        try {
+          const elements = JSON.parse(page.components_json) as unknown[];
+          if (Array.isArray(elements) && elements.length > 0) {
+            dispatch({ type: 'SYNC_FROM_REMOTE', elements: elements as CanvasElement[] });
+          }
+        } catch { /* 忽略解析錯誤 */ }
+      }
+    }).catch(() => {});
+  }, [dispatch]);
 
   const handleSave = useCallback(async () => {
     dispatch({ type: 'SET_STATUS', status: 'saving' });
     try {
-      // TODO A.5：呼叫 KBDB API 儲存 components_json
-      const json = JSON.stringify(sortedElements);
-      console.log('[PrototypeEditor] save:', json);
+      if (!recordIdRef.current) {
+        // 建立新紀錄
+        const page = await createPrototypePage(pageName);
+        recordIdRef.current = page.id;
+      }
+      await savePrototypePage(recordIdRef.current, sortedElements, pageName);
       logAction('SAVE_PROTOTYPE', { page_name: pageName, element_count: sortedElements.length });
       dispatch({ type: 'SET_STATUS', status: 'saved', message: '已儲存' });
       setTimeout(() => dispatch({ type: 'SET_STATUS', status: 'idle' }), 2000);

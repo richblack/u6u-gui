@@ -143,3 +143,55 @@ export async function updateWorkflow(id: string, slots: Record<string, unknown>)
   });
   if (!res.ok) throw new Error(`KBDB error ${res.status}`);
 }
+
+// ── Prototype Pages（透過 u6u-mcp REST 端點） ─────────────────────────────────
+
+export interface PrototypePageRecord {
+  id: string;
+  page_name: string;
+  components_json: string;
+  last_edited_by: string;
+  last_edited_at: string;
+  status: string;
+}
+
+export async function listPrototypePages(): Promise<PrototypePageRecord[]> {
+  const res = await fetch(`${MCP_URL}/prototype-pages`, { headers: authHeaders() });
+  if (!res.ok) return [];
+  const data = (await res.json()) as { pages: PrototypePageRecord[] };
+  return data.pages ?? [];
+}
+
+export async function createPrototypePage(pageName: string): Promise<PrototypePageRecord> {
+  const res = await fetch(`${MCP_URL}/prototype-pages`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ page_name: pageName }),
+  });
+  if (!res.ok) throw new Error(`MCP error ${res.status}`);
+  return res.json() as Promise<PrototypePageRecord>;
+}
+
+export async function getPrototypePage(recordId: string): Promise<PrototypePageRecord> {
+  const res = await fetch(`${MCP_URL}/prototype-pages/${encodeURIComponent(recordId)}`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(`MCP error ${res.status}`);
+  return res.json() as Promise<PrototypePageRecord>;
+}
+
+export async function savePrototypePage(
+  recordId: string,
+  elements: unknown[],
+  pageName?: string
+): Promise<void> {
+  const res = await fetch(`${MCP_URL}/prototype-pages/${encodeURIComponent(recordId)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({
+      components_json: JSON.stringify(elements),
+      ...(pageName !== undefined ? { page_name: pageName } : {}),
+    }),
+  });
+  if (!res.ok) throw new Error(`MCP error ${res.status}`);
+}
