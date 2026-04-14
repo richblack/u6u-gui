@@ -27,20 +27,23 @@ export class U6uBtn extends HTMLElement {
     this._shadow = this.attachShadow({ mode: 'open' });
   }
 
+  private _boundHandleClick = this._handleClick.bind(this);
+
   connectedCallback() {
     this._render();
-    this._shadow.querySelector('button')?.addEventListener('click', this._handleClick.bind(this));
   }
 
   disconnectedCallback() {
-    this._shadow.querySelector('button')?.removeEventListener('click', this._handleClick.bind(this));
+    this._shadow.querySelector('button')?.removeEventListener('click', this._boundHandleClick);
   }
 
   attributeChangedCallback() {
     this._render();
   }
 
-  private _handleClick() {
+  private _handleClick(e: Event) {
+    // 只處理來自 Shadow DOM 內部 button 的 click，避免無限循環
+    if (e.target === this) return;
     if (this.hasAttribute('disabled')) return;
 
     const workflow = this.getAttribute('workflow');
@@ -89,7 +92,7 @@ export class U6uBtn extends HTMLElement {
     `;
 
     // 重新綁定事件（innerHTML 重建後需要重新綁定）
-    this._shadow.querySelector('button')?.addEventListener('click', this._handleClick.bind(this));
+    this._shadow.querySelector('button')?.addEventListener('click', this._boundHandleClick);
   }
 }
 
